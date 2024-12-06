@@ -78,23 +78,42 @@ namespace WIFI
             if( nullptr != _queue_handle )
             {
                 ///> if queue is empty do not block!
-                xQueueReceive(_queue_handle,(void *) &msg,  0);
-            }  
+                if(pdPASS == xQueueReceive(_queue_handle,(void *) &msg,  0))
+                {
+                    char msg_id[32];
+                    memcpy(msg_id, msg.msg_id, std::min(sizeof(msg_id), sizeof(msg.msg_id) )) ;
 
-            ///> check if password is empty 
-            if( '\0'!= msg.password[0] )
-            {
-                ///> This is appropriate time to connect to access point !
-                ESP_LOGI(_log_tag, "SSID: %s", msg.SSID);
-                ESP_LOGI(_log_tag, "pass: %s", msg.password);
-               
-                wifi_config_t cfg{};
+                    ///> We have received creds from smartconfig API
+                    if( strncmp(msg_id, "SMARTCONFIG_CREDS_FROM_NVS" , std::min( (size_t) sizeof(msg_id), strlen("SMARTCONFIG_CREDS_FROM_NVS")+1) ) == 0 \
+                      || strncmp(msg_id, "SMARTCONFIG_CREDS_FROM_ESPTOUCH" , std::min( (size_t) sizeof(msg_id), strlen("SMARTCONFIG_CREDS_FROM_ESPTOUCH")+1)) )
+                    {
+                        ESP_LOGI(_log_tag, "MSG ID: %s", msg.msg_id);
 
-                esp_wifi_get_config(WIFI_IF_STA, &cfg);
-                memcpy( cfg.sta.ssid, msg.SSID , std::min(sizeof(cfg.sta.ssid ), sizeof(msg.SSID ) ) );
-                memcpy( cfg.sta.password, msg.password , std::min(sizeof(cfg.sta.password ), sizeof( msg.password ) ) );
-                esp_wifi_set_config(WIFI_IF_STA, &cfg );
-                esp_wifi_connect();
+                        ///> verifying if password is not empty 
+                        if( '\0'!= msg.password[0] )
+                        {
+                            esp_err_t status{ESP_OK};
+                            wifi_config_t cfg{};
+                            status = esp_wifi_get_config(WIFI_IF_STA, &cfg) ;
+                            if( ESP_OK != status )  ESP_LOGI(_log_tag, "Fail to obtain wifi config for sta.");
+
+                            memcpy( cfg.sta.ssid, msg.SSID , std::min(sizeof(cfg.sta.ssid ), sizeof(msg.SSID ) ) );
+                            memcpy( cfg.sta.password, msg.password , std::min(sizeof(cfg.sta.password ), sizeof( msg.password ) ) );
+                            esp_wifi_set_config(WIFI_IF_STA, &cfg );
+
+                            if( _wifi_state == wifi_state_e::WIFI_READY_TO_CONNECT)
+                            {
+                                //> This is appropriate time to connect to access point !
+                                ESP_LOGI(_log_tag, "SSID: %s", msg.SSID);
+                                ESP_LOGI(_log_tag, "pass: %s", msg.password);
+
+                                esp_wifi_connect();
+                            }    
+                       }
+                    }
+                }  
+
+          
 
                 // lock_wifi_state();
                 // switch( _wifi_state )
@@ -103,6 +122,8 @@ namespace WIFI
                 //      esp_wifi_set_config()
                 // }
             }
+
+           
 
             vTaskDelay(pdMS_TO_TICKS(500) );
         }
@@ -315,11 +336,13 @@ namespace WIFI
                             ///> Start is being done in Wifi start fun in the meantime .
                             // if( nullptr != sc )
                             // {
+                            //     ESP_LOGI(_log_tag, "Running in task: %s", pcTaskGetName(NULL) );
                             //     ESP_LOGI(_log_tag, "Starting smartconfig from wifi: %d, %s", __LINE__, __func__);
                             //     sc->start();
                             // }
+                            ESP_LOGI(_log_tag, " Running in task: %s", pcTaskGetName(NULL));
                             ESP_LOGI(_log_tag, "WIFI_READY_TO_CONNECT: %d, %s", __LINE__, __func__);
-                            esp_wifi_connect();
+                           // esp_wifi_connect();
 
                             break;
                            

@@ -2,6 +2,7 @@
 #include <cstring>
 #include <algorithm>
 
+
 namespace SMARTCONFIG
 {
     /*------------------------------------STATICS INITIALISATION------------------------------------------*/
@@ -15,7 +16,7 @@ namespace SMARTCONFIG
     esp_err_t SmartConfig::_init()
     {
         esp_err_t status{ESP_OK};
-  
+       
         ///> Create event loop only if there isnt't one 
          status = esp_event_loop_create_default();
         if( ESP_ERR_INVALID_STATE == status )
@@ -83,7 +84,7 @@ namespace SMARTCONFIG
 
                 if( ESP_OK == status)
                 {
-                    ESP_LOGI(_log_tag, "NOT_STARTED->STARTED");
+                    ESP_LOGI(_log_tag, "STARTING");
                     smartconfig_state = smartconfig_e::STARTED;
                 }
 
@@ -123,19 +124,51 @@ namespace SMARTCONFIG
         instance->start_smartconfig_initiation_process();  ///> todo: communicate initiation result
 
         ESP_LOGI(_log_tag, "Giving  init semaphore: %d, %s", __LINE__, __func__);
+
+       ///> signal tha calling task we are done with smartconfig initialisation process
         give_smartconfig_initialisation_semaphore();
+
+        size_t size_required ;
+        nvs_load_creds("creds", nullptr , &size_required);
+        IotData_t* msg = new IotData_t[size_required] ;
+
+        //nvs_delete_creds();
+
+        ///> when we boot , load credentials from NVS  
+         if(nullptr != msg && ESP_OK ==  nvs_load_creds("creds", msg , &size_required) )
+         {
+                
+                char buff[32]{};
+                // smartconfig_event_got_ssid_pswd_t data;
+                // memcpy(data.ssid , msg.SSID, std::min( sizeof(data.ssid), sizeof(msg.SSID)));
+                // memcpy(data.password , msg.password, std::min( sizeof(data.password), sizeof(msg.password)));
+                to_string(smartconfig_message_type_e::SMARTCONFIG_CREDS_FROM_NVS, buff, sizeof(buff));
+                memcpy(msg->msg_id, buff , sizeof(msg->msg_id));
+                /// we got creds from nvs , sent the to queue
+                sendToQueue(*msg);
+          }
+          if( nullptr != msg) delete[] msg;
+
 
         while(true)
         {
             ESP_LOGI(_log_tag, "Smartfconfig task is running..");
-            vTaskDelay( pdMS_TO_TICKS(2000));
+          
+           ///> ToDo: keep smartconfig task work here 
+           
+            vTaskDelay( pdMS_TO_TICKS(4000));
         }
 
     }
 
     esp_err_t SmartConfig::start_smartconfig_initiation_process()
     {
-        return _init();
+        esp_err_t status{ESP_OK};
+        
+        ///> initialize smartconfig
+        status = _init();
+
+        return status;
     }
 
     esp_err_t SmartConfig::create_smartconfig_state_mutex()
@@ -223,16 +256,16 @@ namespace SMARTCONFIG
         cfg = sm_cfg;
     }
 
-    esp_err_t SmartConfig::sendToQueue(smartconfig_event_got_ssid_pswd_t credentials)
+    esp_err_t SmartConfig::sendToQueue(IotData_t data)
     {
         esp_err_t status{ESP_OK};
-        IotData_t msg;
-        memcpy(msg.password, credentials.password, std::min(sizeof(msg.password) , sizeof(credentials.password) ) );
-        memcpy(msg.SSID, credentials.ssid, std::min( sizeof(msg.SSID) , sizeof(credentials.ssid) ) );
+        // IotData_t msg;
+        // memcpy(msg.password, credentials.password, std::min(sizeof(msg.password) , sizeof(credentials.password) ) );
+        // memcpy(msg.SSID, credentials.ssid, std::min( sizeof(msg.SSID) , sizeof(credentials.ssid) ) );
 
         if( nullptr != _queue_handle )
         {
-            status = xQueueSend(_queue_handle, &msg , pdMS_TO_TICKS(1000));
+            status = xQueueSend(_queue_handle, &data , pdMS_TO_TICKS(1000));
             if( pdTRUE != status)
             {
                 ESP_LOGI(_log_tag, "send to queue timed out");
@@ -251,13 +284,24 @@ namespace SMARTCONFIG
         ///> Todo handle sc events here!
         
         if( SC_EVENT == event_base )
-        {
+        { 
+            IotData_t msg{};
+            char buff[32]{};
             smartconfig_event_got_ssid_pswd_t* data = static_cast<smartconfig_event_got_ssid_pswd_t* >(event_data);
             switch ( event_id )
             {
                 case SC_EVENT_GOT_SSID_PSWD:
+                {
                    ESP_LOGI(_log_tag, " Smartconfig got password! ");
-                   sendToQueue(*data); 
+                   memcpy( msg.SSID, data->ssid , std::min(sizeof(msg.SSID), sizeof(data->ssid)) );
+                   memcpy( msg.password, data->password, std::min(sizeof(msg.password), sizeof(data->password)) );
+                    ///> save the creds to nvs
+                   nvs_save_creds("creds", &msg, sizeof(msg));
+
+                   to_string(smartconfig_message_type_e::SMARTCONFIG_CREDS_FROM_ESPTOUCH, buff, sizeof(buff));
+                   memcpy( msg.msg_id, buff , std::min(sizeof(msg.msg_id), sizeof(buff)) );
+                   sendToQueue(msg);
+                }
                    break;
 
                 case  SC_EVENT_SEND_ACK_DONE:
@@ -270,5 +314,73 @@ namespace SMARTCONFIG
         
 
     }
+    // Function to map enum values to string representations
+   void SmartConfig::to_string(smartconfig_message_type_e messageType, char *out_buff, size_t len)
+     {
+        switch (messageType) {
+            case smartconfig_message_type_e::SMARTCONFIG_RUNNING:
+                memcpy(out_buff, "SMARTCONFIG_RUNNING", len );
+                break;
+               
+            case smartconfig_message_type_e::SMARTCONFIG_STOPPED:
+                memcpy(out_buff, "SMARTCONFIG_STOPPED", len );
+                break;
+                
+            case smartconfig_message_type_e::SMARTCONFIG_CREDS_FROM_NVS:
+                memcpy(out_buff, "SMARTCONFIG_CREDS_FROM_NVS", len );
+                break;
+            case smartconfig_message_type_e::SMARTCONFIG_CREDS_FROM_ESPTOUCH:
+                memcpy(out_buff, "SMARTCONFIG_CREDS_FROM_ESPTOUCH", len );
+                break;
 
+            default:
+                memcpy(out_buff, "UNKNOWN", len );
+                break;
+              
+        }
+    }
+
+    esp_err_t SmartConfig::nvs_save_creds(const char *key, const void *value, size_t length)
+    {
+        nvs_handle handle {};
+        esp_err_t  status{ESP_OK};
+        status = nvs_open(_nvs_namespace, NVS_READWRITE, &handle);
+
+        ESP_LOGI(_log_tag,"Saving credentials to nvs");
+        if(ESP_OK == status) status = nvs_set_blob(handle,key , value , length);
+
+        if(ESP_OK == status ) status = nvs_commit(handle);
+
+        if( handle )  nvs_close(handle);
+
+        return status;
+    }
+
+    esp_err_t SmartConfig::nvs_load_creds(const char *key, void *out_value, size_t *length)
+    {
+        nvs_handle handle {};
+        esp_err_t  status{ESP_OK};
+        status = nvs_open(_nvs_namespace, NVS_READWRITE, &handle);
+
+        ESP_LOGI(_log_tag,"Retreiving credentials from nvs");
+        if(ESP_OK == status) status = nvs_get_blob(handle,key , out_value , length);
+
+        if( handle )  nvs_close(handle);
+         ESP_LOGI(_log_tag,"%s", esp_err_to_name(status));
+        return status;
+    }
+
+    esp_err_t SmartConfig::nvs_delete_creds()
+    {
+        nvs_handle handle {};
+        esp_err_t  status{ESP_OK};
+        status = nvs_open(_nvs_namespace, NVS_READWRITE, &handle);
+
+        ESP_LOGI(_log_tag,"Deleting credentials from nvs");
+        if(ESP_OK == status) status = nvs_erase_all(handle);
+
+        if( handle )  nvs_close(handle);
+
+        return status;
+    }
 } // namespace SMARTCONFIG

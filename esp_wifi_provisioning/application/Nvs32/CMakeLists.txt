@@ -1,0 +1,6 @@
+set(SOURCES ./Nvs32.cpp )
+
+idf_component_register(SRCS ${SOURCES}
+                        INCLUDE_DIRS . 
+                        REQUIRES   nvs_flash   )
+                        

@@ -11,19 +11,30 @@
 #include "TaskCommons.h"
 #include "CommInterface.h"
 #include "IotData.h"
+#include "esp_flash.h"
+#include "nvs_flash.h"
 
 namespace SMARTCONFIG
 {
     class SmartConfig : public CommInterface
     {
         public:
-            ///> Enum Smartconfig State Machine
+            ///>Smartconfig State Machine
             enum class smartconfig_e
             {
                 NOT_STARTED,
                 STARTED
             };
 
+            ///> Smartconfig Messages
+            enum class smartconfig_message_type_e
+            {
+                SMARTCONFIG_RUNNING,                ///> smartconfig service is running 
+                SMARTCONFIG_STOPPED,                ///> smartconfig service is stopped
+                SMARTCONFIG_CREDS_FROM_NVS,         ////> smartconfig got credantials fron nvs 
+                SMARTCONFIG_CREDS_FROM_ESPTOUCH     ///> smartconfig got credentials from phone.
+
+            };
     /*-------------------------------------PUBLIC METHODS --------------------------------------------*/
             ///> constructer 
             SmartConfig(smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT(), QueueHandle_t queue_handle = nullptr)
@@ -31,12 +42,13 @@ namespace SMARTCONFIG
                  setConfig(cfg);  ///> sets user provided config.
                  QueueHandle_t queue = queue_handle;
                  _queue_handle = queue;
+               
             }
 
             ///> Destructor
             ~SmartConfig()
             {
-
+             
             }
 
             ///> Starts Smartconfig services
@@ -46,9 +58,9 @@ namespace SMARTCONFIG
             esp_err_t stop() override;
 
             ///> gets and returns smarttconfig state machine 
-            smartconfig_e getSmartConfigState();
+            smartconfig_e getSmartConfigStateMachine();
 
-
+           
 
         private:
     /*---------------------------------------PRIVATE MEMBERS---------------------------------------------------------*/
@@ -59,6 +71,7 @@ namespace SMARTCONFIG
             static SemaphoreHandle_t smartconfig_init_done;           ///> semaphore to signal when done initialising
             static TaskHandle_t     _smartconfig_handle;              ///> handle to created smartconfig task. Todo: guard thr semaphore
             static QueueHandle_t           _queue_handle;                    ///> handle to smartconfig queue
+            constexpr static const char* const _nvs_namespace{"nvs"};
 
     /*--------------------------------------STATIC PRIVATE METHODS--------------------------------------------------*/
 
@@ -94,61 +107,41 @@ namespace SMARTCONFIG
             static void setConfig(smartconfig_start_config_t cfg);
 
             ///> sends smartconfig data into queue
-            static esp_err_t sendToQueue( smartconfig_event_got_ssid_pswd_t credentials);
+            static esp_err_t sendToQueue(IotData_t data);
 
-    /*----------------------------------- EVENT HANDLERS -----------------------------------------------------*/
+            // Function to map enum values to string representations
+            static void to_string(smartconfig_message_type_e messageType , char *out_buff, size_t len); 
+    
+
+    /*----------------------------------- EVENT HANDLERS -------------------------------------------------*/
             ///> Smartconfig event handler 
             static void smartconfig_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data);
 
+
+    /*------------------------------------ NVS ----------------------------------------------------------------*/
+    /// @brief               saves credentials to nvs
+                /// @param handle        handle to nvs 
+                /// @param key           ssid
+                /// @param value         password
+                /// @param length        length of password
+                /// @return              ESP_OK for success  otherwise ESP_FAIL
+               static esp_err_t nvs_save_creds(const char *key, const void *value, size_t length);
+
+                /// @brief                loads credentials from nvs 
+                /// @param handle         handle to nvs
+                /// @param key            ssid
+                /// @param out_value      password
+                /// @param length         lenght of password
+                /// @return               ESP_OK - ssid and password found otherwise ESP_FAIL
+                static esp_err_t nvs_load_creds(const char *key, void *out_value, size_t *length);
+
+                /// @brief                 Deletes credentials from nvs 
+                /// @return                ESP_OK - success otherwise Fail
+                static esp_err_t nvs_delete_creds();
+                
     };
-
-
-
-    /*---------------------------------- SMART CONFIG ---------------------------------- */
-///> Smart config for smartconfig privisioning 
-// class SmartConfig : public CommunicationInterface
-// {
-//   public:
-//     
-//   private:
-//   ///> static member attributes here
-//   static smartconfig_e _smartconfig_state ;
-//   static smartconfig_start_config_t cfg;
-
-//   static esp_err_t _init()
-//   {
-//     esp_err_t status{ESP_OK};
-//     switch(_smartconfig_state) 
-//     {
-//       case smartconfig_e::NOT_STARTED:
-//       {
-//         status =  esp_smartconfig_set_type(SC_TYPE_ESPTOUCH);
-        
-//             if( ESP_OK == status) 
-//             {
-//             cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
-//             status = esp_smartconfig_start(&cfg);
-//             }
-            
-//             if( ESP_OK == status)
-//             {
-            
-//             _smartconfig_state = smartconfig_e::STARTED;
-            
-//             }
-//         break;
-//       }
-      
-//       default:
-//       break;
-//     }
-
-//     return status;
-//   }
-
-// };
-
+   
 } //namespace SMARTCONFIG_H
 
 
